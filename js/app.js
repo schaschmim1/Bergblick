@@ -283,38 +283,61 @@ function drawPeaks(g, cam, k) {
   items.sort((a, b) => b.score - a.score);
   const fs = 13 * k;
   g.font = `600 ${fs}px system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
-  const taken = [];
+  // Belegte Flächen als gedrehte Rechtecke (Beschriftungen) und kleine Quadrate (Gipfelpunkte).
+  // Schräge Namen liegen parallel und dürfen eng nebeneinander stehen; früher wurde ihre ganze
+  // waagrechte Breite gesperrt, dann passten auf schmale Handybildschirme nur 3–4 Namen.
+  const boxes = [];
   const placed = [];
   const maxLabels = Math.max(10, Math.floor((xmax - xmin) / (15 * k)));
+  const A60 = -60 * Math.PI / 180;
   for (const it of items) {
     if (placed.length >= maxLabels) break;
     const text = `${it.p.name}  ${Math.round(it.p.ele)} m`;
     const tw = g.measureText(text).width;
-    const ang = -60 * Math.PI / 180;
-    const x0 = it.x - 6 * k, x1 = it.x + tw * Math.cos(ang) + 8 * k;
-    if (taken.some(([a, b]) => x0 < b && x1 > a)) continue;
-    taken.push([x0, x1]);
-    placed.push({ ...it, text, tw, ang });
+    // Platz nach oben? Sonst Beschriftung unterhalb des Gipfels schräg nach unten
+    const room = it.y - 12 * k - ytop >= tw * Math.sin(-A60) + 4 * k;
+    let ly2, ang = A60;
+    if (room) {
+      const ly = Math.max(ytop + tw * Math.sin(-A60) + 8 * k, it.y - 28 * k);
+      ly2 = Math.min(ly, it.y - 10 * k);
+    } else { ly2 = it.y + 14 * k; ang = -A60; }
+    const ox = it.x, oy = ly2 + (room ? -2 : 6) * k;
+    const label = rotRect(ox, oy, ang, -2 * k, tw + 3 * k, -fs * 0.85 - 1.5 * k, fs * 0.3 + 1.5 * k);
+    const dot = rotRect(it.x, it.y, 0, -4 * k, 4 * k, -4 * k, 4 * k);
+    if (boxes.some((q) => polysOverlap(q, label) || polysOverlap(q, dot))) continue;
+    boxes.push(label, dot);
+    placed.push({ ...it, text, tw, ang, room, ly2, ox, oy });
   }
   state.labels = k === 1 ? placed : state.labels;
   for (const it of placed) {
-    // Platz nach oben? Sonst Beschriftung unterhalb des Gipfels schräg nach unten
-    const room = it.y - 12 * k - ytop >= it.tw * Math.sin(-it.ang) + 4 * k;
-    let ly2, ang = it.ang;
-    if (room) {
-      const ly = Math.max(ytop + it.tw * Math.sin(-it.ang) + 8 * k, it.y - 28 * k);
-      ly2 = Math.min(ly, it.y - 10 * k);
-    } else { ly2 = it.y + 14 * k; ang = -it.ang; }
     g.strokeStyle = 'rgba(255,255,255,0.9)'; g.lineWidth = 1 * k;
-    g.beginPath(); g.moveTo(it.x, it.y + (room ? -3 : 3) * k); g.lineTo(it.x, ly2); g.stroke();
+    g.beginPath(); g.moveTo(it.x, it.y + (it.room ? -3 : 3) * k); g.lineTo(it.x, it.ly2); g.stroke();
     g.fillStyle = state.selected === it.p.i ? '#ffb547' : '#fff';
     g.beginPath(); g.arc(it.x, it.y, 2.6 * k, 0, Math.PI * 2); g.fill();
-    g.save(); g.translate(it.x, ly2 + (room ? -2 : 6) * k); g.rotate(ang);
+    g.save(); g.translate(it.ox, it.oy); g.rotate(it.ang);
     g.lineWidth = 3 * k; g.strokeStyle = 'rgba(0,0,0,0.65)'; g.strokeText(it.text, 0, 0);
     g.fillText(it.text, 0, 0);
     g.restore();
-    it.lx = it.x; it.ly = ly2;
+    it.lx = it.x; it.ly = it.ly2;
   }
+}
+
+// Rechteck im um (ox, oy) um ang gedrehten Koordinatensystem: u entlang der Schrift, v quer dazu
+function rotRect(ox, oy, ang, u0, u1, v0, v1) {
+  const c = Math.cos(ang), s = Math.sin(ang);
+  const pt = (u, v) => [ox + u * c - v * s, oy + u * s + v * c];
+  return [pt(u0, v0), pt(u1, v0), pt(u1, v1), pt(u0, v1)];
+}
+// Trennende Achse: zwei konvexe Vierecke überlappen, wenn keine Kantennormale sie trennt
+function polysOverlap(a, b) {
+  for (const P of [a, b]) for (let i = 0; i < 4; i++) {
+    const p = P[i], q = P[(i + 1) % 4], nx = q[1] - p[1], ny = p[0] - q[0];
+    let amin = Infinity, amax = -Infinity, bmin = Infinity, bmax = -Infinity;
+    for (const r of a) { const d = r[0] * nx + r[1] * ny; amin = Math.min(amin, d); amax = Math.max(amax, d); }
+    for (const r of b) { const d = r[0] * nx + r[1] * ny; bmin = Math.min(bmin, d); bmax = Math.max(bmax, d); }
+    if (amax <= bmin || bmax <= amin) return false;
+  }
+  return true;
 }
 
 // Erkannter Horizont im Foto (Testanzeige)
