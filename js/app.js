@@ -1319,7 +1319,28 @@ $('btnShare').onclick = () => deliverFrozen(true);
 $('adjRot').oninput = () => { state.settings.camRoll = +$('adjRot').value / 10; syncAdjust(); requestDraw(); };
 $('adjFov').oninput = () => { state.settings.camFovK = +$('adjFov').value / 100; syncAdjust(); requestDraw(); };
 $('adjRot').onchange = $('adjFov').onchange = saveSettings;
-$('btnPano').onclick = () => { $('peakCard').hidden = true; setMode('pano'); state.view.roll = 0; if (state.view.hfov < 30) state.view.hfov = 60; requestDraw(); };
+$('btnPano').onclick = () => {
+  $('peakCard').hidden = true;
+  let pv = null;
+  if (state.mode === 'photo' && state.img) {
+    // Panorama zeigt denselben Ausschnitt wie das Foto auf dem Bildschirm (Mitte und Zoom)
+    const cam = currentCamera(), [rx, ry, rw, rh] = cam.rect;
+    const x = Math.max(rx, Math.min(rx + rw, W / 2)), y = Math.max(ry, Math.min(ry + rh, H / 2));
+    const dx = x - cam.cx, dy = cam.cy - y;
+    const d = [0, 1, 2].map((i) => cam.f[i] * cam.F + cam.r[i] * dx + cam.u[i] * dy);
+    const fovW = 2 * Math.atan(W / 2 / cam.F) * 180 / Math.PI;
+    pv = {
+      heading: (Math.atan2(d[0], d[1]) * 180 / Math.PI + 360) % 360,
+      pitch: Math.asin(d[2] / Math.hypot(...d)) * 180 / Math.PI,
+      roll: 0,
+      hfov: Math.max(3, Math.min(150, W > H ? fovW : fovW * H / W)),
+    };
+  }
+  setMode('pano');
+  if (pv) Object.assign(state.view, pv);
+  else { state.view.roll = 0; if (state.view.hfov < 30) state.view.hfov = 60; }
+  requestDraw();
+};
 // Foto-Reiter: ist schon ein Foto geladen, zurück dazu; erst im Foto-Reiter öffnet ein Tipp die Auswahl
 $('btnPhoto').addEventListener('click', (e) => {
   if (e.target.id === 'file') return;
