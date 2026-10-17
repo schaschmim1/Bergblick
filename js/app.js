@@ -1001,7 +1001,7 @@ function zoomAt(f, px, py) {
   if (!state.img) return;
   const iw = state.img.width, ih = state.img.height, fit = Math.min(W / iw, H / ih);
   const z = state.zoom, s0 = fit * z.s;
-  const ns = Math.max(1, Math.min(16, z.s * f)), s1 = fit * ns;
+  const ns = Math.max(1, Math.min(40, z.s * f)), s1 = fit * ns;
   const rx0 = (W - iw * s0) / 2 + z.x, ry0 = (H - ih * s0) / 2 + z.y;
   const u = (px - rx0) / s0, v = (py - ry0) / s0;
   z.s = ns;
@@ -1024,7 +1024,7 @@ function setAdjust(on) {
 }
 
 function setFov(f) {
-  state.view.hfov = Math.max(state.mode === 'photo' ? 5 : 10, Math.min(state.mode === 'photo' ? 120 : 150, f));
+  state.view.hfov = Math.max(state.mode === 'photo' ? 5 : 3, Math.min(state.mode === 'photo' ? 120 : 150, f));
   if (state.mode === 'photo') syncSliders();
   requestDraw();
 }
