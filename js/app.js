@@ -288,7 +288,11 @@ function drawPeaks(g, cam, k) {
   // waagrechte Breite gesperrt, dann passten auf schmale Handybildschirme nur 3–4 Namen.
   const boxes = [];
   const placed = [];
-  const maxLabels = Math.max(10, Math.floor((xmax - xmin) / (15 * k)));
+  // Weit herausgezoomt nur die wichtigsten Gipfel, beim Hineinzoomen immer mehr:
+  // ab 60° Bildwinkel ein Name je 90 px Breite, bei 6° und enger einer je 24 px
+  const fovW = 2 * Math.atan((xmax - xmin) / 2 / cam.F) * 180 / Math.PI;
+  const pxPer = 24 + 66 * Math.max(0, Math.min(1, (fovW - 6) / 54));
+  const maxLabels = Math.max(3, Math.floor((xmax - xmin) / k / pxPer));
   const A60 = -60 * Math.PI / 180;
   for (const it of items) {
     if (placed.length >= maxLabels) break;
@@ -469,6 +473,9 @@ function hideHint() { $('hint').hidden = true; }
 
 function setMode(mode) {
   if (state.mode === 'live' && mode !== 'live') stopLive();
+  // Ansicht des Fotos merken, Panorama und Kamera benutzen state.view anders
+  if (state.mode === 'photo' && mode !== 'photo') state.photoView = { ...state.view };
+  if (mode === 'photo' && state.mode !== 'photo' && state.photoView) { state.view = { ...state.photoView }; state.photoView = null; }
   state.mode = mode;
   // Panorama fürs Foto (nur Blickbereich, ohne Satellitenfarben) taugt nicht für Panorama und Kamera
   if (mode !== 'photo' && state.pano && state.pano.photo && (mode === 'pano' || state.pano.sector)) computePanorama();
@@ -834,7 +841,7 @@ async function loadPhoto(file) {
   const img = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(async () => {
     const im = new Image(); im.src = URL.createObjectURL(file); await im.decode(); return im;
   });
-  state.img = img; state.imgName = file.name.replace(/\.[^.]+$/, '') + '-bergblick';
+  state.img = img; state.imgName = file.name.replace(/\.[^.]+$/, '') + '-bergblick'; state.photoView = null;
   state.anchors = []; state.photoSky = null; state.lastAlign = null; state.alignHint = null;
   resetZoom(); setAdjust(false);
   const iw = img.width, ih = img.height;
@@ -1312,7 +1319,12 @@ $('btnShare').onclick = () => deliverFrozen(true);
 $('adjRot').oninput = () => { state.settings.camRoll = +$('adjRot').value / 10; syncAdjust(); requestDraw(); };
 $('adjFov').oninput = () => { state.settings.camFovK = +$('adjFov').value / 100; syncAdjust(); requestDraw(); };
 $('adjRot').onchange = $('adjFov').onchange = saveSettings;
-$('btnPano').onclick = () => { $('peakCard').hidden = true; state.view.roll = 0; if (state.view.hfov < 30) state.view.hfov = 60; setMode('pano'); };
+$('btnPano').onclick = () => { $('peakCard').hidden = true; setMode('pano'); state.view.roll = 0; if (state.view.hfov < 30) state.view.hfov = 60; requestDraw(); };
+// Foto-Reiter: ist schon ein Foto geladen, zurück dazu; erst im Foto-Reiter öffnet ein Tipp die Auswahl
+$('btnPhoto').addEventListener('click', (e) => {
+  if (e.target.id === 'file') return;
+  if (state.img && state.mode !== 'photo') { e.preventDefault(); $('peakCard').hidden = true; setMode('photo'); showHint('Für ein anderes Foto nochmal auf „Foto“ tippen.', 3000); }
+});
 $('file').onchange = (e) => { const f = e.target.files[0]; if (f) loadPhoto(f); e.target.value = ''; };
 $('btnAlign').onclick = () => autoAlign();
 $('btnPin').onclick = () => { $('pinSheet').hidden = false; $('pinSearch').value = ''; showPinList(''); $('pinSearch').focus(); };
