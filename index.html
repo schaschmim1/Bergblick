@@ -24,6 +24,12 @@
       <span class="brand">Bergblick</span>
       <span id="info" class="info">Lade Daten…</span>
     </div>
+    <button id="btnFind" class="icon glass" aria-label="Gipfel suchen">
+      <svg class="ol" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg>
+    </button>
+    <button id="btnSun" class="icon glass" aria-label="Sonne und Schatten">
+      <svg class="ol" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6"/></svg>
+    </button>
     <button id="btnSettings" class="icon glass" aria-label="Einstellungen">
       <svg class="ol" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.4M12 18.6V21M21 12h-2.4M5.4 12H3M18.4 5.6l-1.7 1.7M7.3 16.7l-1.7 1.7M18.4 18.4l-1.7-1.7M7.3 7.3L5.6 5.6"/></svg>
     </button>
@@ -37,6 +43,7 @@
       <button id="btnAdjust" class="chip">Verschieben</button>
       <label class="chip">Bildwinkel <input id="fov" type="range" min="5" max="120" step="0.5"><span id="fovVal" class="val"></span></label>
       <label class="chip">Drehung <input id="roll" type="range" min="-10" max="10" step="0.1"></label>
+      <button id="btnLocSearch" class="chip">Standort suchen</button>
     </div>
     <div class="photorow glass">
       <button id="btnAlign" class="chip primary"><svg viewBox="0 0 24 24"><path d="M12 2 9.5 8.5 3 11l6.5 2.5L12 20l2.5-6.5L21 11l-6.5-2.5L12 2Z"/></svg><span>Ausrichten</span></button>
@@ -145,6 +152,42 @@
     <p class="small">Wähle einen Gipfel, den du im Foto erkennst, und tippe dann im Foto auf seine Spitze. Mit zwei Gipfeln (möglichst weit auseinander) sitzt die Ausrichtung genau.</p>
     <input id="pinSearch" type="search" placeholder="Gipfel suchen" autocomplete="off" style="width:100%">
     <ul id="pinResults" class="results"></ul>
+  </section>
+
+  <!-- Sonne: Datum und Uhrzeit, Licht und Schatten im Panorama -->
+  <section id="sunBar" class="sunbar" hidden>
+    <div class="sun-head">
+      <label class="switch"><input id="sunOn" type="checkbox"><span></span>Sonne &amp; Schatten</label>
+      <button id="btnSunClose" class="close" aria-label="Schließen">✕</button>
+    </div>
+    <div class="sun-row">
+      <input id="sunDate" type="date">
+      <button id="btnSunNow" class="chip">Jetzt</button>
+    </div>
+    <div class="adj-row">
+      <div class="adj-lbl"><label for="sunTime">Uhrzeit</label><span id="sunTimeVal"></span></div>
+      <input id="sunTime" type="range" min="0" max="1439" step="1" value="720">
+    </div>
+    <div id="sunInfo" class="small"></div>
+  </section>
+
+  <section id="findSheet" class="sheet" hidden>
+    <div class="sheet-head">
+      <h2>Gipfel suchen</h2>
+      <button class="close" data-close="findSheet" aria-label="Schließen">✕</button>
+    </div>
+    <input id="findInput" type="search" placeholder="Name des Gipfels" autocomplete="off" style="width:100%">
+    <ul id="findResults" class="results tall"></ul>
+  </section>
+
+  <section id="histSheet" class="sheet" hidden>
+    <div class="sheet-head">
+      <h2>Fotos</h2>
+      <button class="close" data-close="histSheet" aria-label="Schließen">✕</button>
+    </div>
+    <label for="file" class="wide primary btnlike">Neues Foto wählen</label>
+    <p class="small">Zuletzt geöffnet, mit Standort und Ausrichtung:</p>
+    <ul id="histList" class="histlist"></ul>
   </section>
 
   <div id="peakCard" class="peakcard glass" hidden></div>

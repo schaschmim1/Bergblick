@@ -144,3 +144,30 @@ input:focus, select:focus { border-color: var(--accent); background: #fff; }
   #tunebar label.chip { width: 100%; justify-content: space-between; }
   #tunebar .chip input[type=range] { flex: 1; }
 }
+
+/* Sonne */
+.sunbar { position: fixed; left: 12px; right: 12px; bottom: calc(var(--bar-b) + 74px); max-width: 460px; margin: 0 auto; padding: 14px 18px 14px; border-radius: 26px; display: flex; flex-direction: column; gap: 10px; background: rgba(255, 255, 255, .88); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); box-shadow: var(--shadow); z-index: 5; }
+.sun-head, .sun-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.sun-row input[type=date] { flex: 1; min-width: 0; padding: 8px 12px; }
+.sunbar .chip { background: var(--field); }
+.switch { display: flex; align-items: center; gap: 10px; font-weight: 600; cursor: pointer; }
+.switch input { position: absolute; opacity: 0; pointer-events: none; }
+.switch span { position: relative; width: 44px; height: 26px; border-radius: 13px; background: rgba(34, 48, 58, .18); transition: background .2s; }
+.switch span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); transition: transform .2s var(--ease); }
+.switch input:checked + span { background: var(--accent); }
+.switch input:checked + span::after { transform: translateX(18px); }
+#sunInfo { line-height: 1.45; }
+button.icon.on { color: var(--accent); }
+
+/* Gipfelsuche, Fotoverlauf */
+.results.tall { max-height: 55vh; margin-top: 8px; }
+.results li .tag { color: var(--accent); }
+.results li .tag.off { color: #b0703a; }
+label.btnlike { display: block; text-align: center; cursor: pointer; }
+.histlist { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; }
+.histlist li { position: relative; border-radius: 14px; overflow: hidden; background: var(--field); cursor: pointer; }
+.histlist img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
+.histlist .cap { padding: 6px 8px 8px; font-size: 12px; line-height: 1.3; }
+.histlist .cap b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.histlist .cap span { color: var(--muted); }
+.histlist .del { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(255, 255, 255, .85); color: var(--muted); font-size: 12px; }

@@ -58,6 +58,7 @@ self.onmessage = async (e) => {
       if (m.panoId && panos.has(m.panoId)) pano = panos.get(m.panoId);
       try { post('align', { id: m.id, ...align(m) }); } finally { pano = keep; }
     }
+    else if (m.type === 'locsearch') post('locsearch', { id: m.id, ...locSearch(m) });
     else if (m.type === 'search') post('search', { id: m.id, results: search(m.q, m.lat, m.lon) });
     else if (m.type === 'elev') post('elev', { id: m.id, elev: dem.elev(m.lat, m.lon), covered: dem.covers(m.lat, m.lon) });
     else if (m.type === 'prefetch') post('prefetch', { id: m.id, ...(await prefetch(m)) });
@@ -393,7 +394,8 @@ function satColor(wins, u, v, d, out) {
 
 const SUN = (() => { const az = 215 * D2R, alt = 38 * D2R; return [Math.cos(alt) * Math.sin(az), Math.cos(alt) * Math.cos(az), Math.sin(alt)]; })();
 
-function panorama({ lat, lon, agl = 2, alt = null, maxDist = 200000, cols = 7200, wins = detail.wins, satWins = [], sector = null }) {
+const MAX_ELE = 4810;
+function panorama({ lat, lon, agl = 2, alt = null, maxDist = 200000, cols = 7200, wins = detail.wins, satWins = [], sector = null, sun = null }) {
   // mit sector [Mitte, halbe Breite] nur diese Spalten rechnen (Foto); die übrigen bleiben leer
   const inSector = (a) => !sector || Math.abs(((a - sector[0] + 540) % 360) - 180) <= sector[1];
   const t0 = performance.now();
@@ -422,6 +424,29 @@ function panorama({ lat, lon, agl = 2, alt = null, maxDist = 200000, cols = 7200
 
   const phi = lat * D2R, lam = lon * D2R, sp = Math.sin(phi), cp = Math.cos(phi);
   const mPerU = 2 * Math.PI * R_EARTH * cp; // Meter je Einheit u (lokal)
+  // Sonne zu Datum und Uhrzeit: Licht aus ihrer Richtung, Schlagschatten der Berge, Dämmerung und Nacht.
+  // Ohne sun eine feste Nachmittagssonne nur für die Hangschattierung.
+  const sunOn = !!sun;
+  const SL = sunOn ? enu(sun.az, Math.max(0.5, sun.alt)) : SUN;
+  const sunTan = sunOn ? Math.tan(Math.max(0, sun.alt) * D2R) : 0;
+  const dayK = sunOn ? Math.max(0.13, Math.min(1, (sun.alt + 6) / 9)) : 1;  // Helligkeit: Nacht … Tag
+  const warm = sunOn ? Math.max(0, Math.min(1, 1 - sun.alt / 14)) : 0;     // tiefe Sonne färbt das Licht warm
+  const sdu = sunOn ? Math.sin(sun.az * D2R) / mPerU : 0, sdv = sunOn ? -Math.cos(sun.az * D2R) / mPerU : 0;
+  // Liegt der Punkt im Schatten eines Berges? Strahl zur Sonne mit wachsenden Schritten, bis er über
+  // dem höchsten Gipfel der Alpen liegt oder 40 km weit gekommen ist.
+  let topEle = 0; // höchster Gipfel, den ein Schattenstrahl treffen kann
+  if (sunOn) for (let i = 0; i < peaks.n; i++) if (peaks.ele[i] > topEle && Math.abs(peaks.lat[i] - lat) < (maxDist + 40000) / 111000 && distAz(lat, lon, peaks.lat[i], peaks.lon[i])[0] < maxDist + 40000) topEle = peaks.ele[i];
+  topEle = Math.min(MAX_ELE, topEle + 30);
+  const shadowed = (u, v, h, d) => {
+    const s0 = 14 + d * 0.004;
+    for (let x = s0 * 1.5; x < 40000; x += Math.max(s0, x * 0.11)) {
+      const ray = h + 3 + x * sunTan + x * x / (2 * R_EARTH);
+      if (ray > topEle) return false;
+      if (elev(u + sdu * x, v + sdv * x, d) > ray) return true;
+    }
+    return false;
+  };
+  let nShadow = 0;
   const edges = [];          // pro Spalte [tan, d, sky]
   const runs = [];           // sichtbare Abschnitte: [tanOben, dStart, Schattierung, Höhe]
   const runEnd = [];         // Entfernung der letzten Probe je Abschnitt
@@ -447,6 +472,7 @@ function panorama({ lat, lon, agl = 2, alt = null, maxDist = 200000, cols = 7200
       continue;
     }
     let rD = 0, rS = -9, rE = 0; // letzter Abschnitt
+    let lastSh = -1, lastK = -9;
     let vi = 0;
     for (let k = 0; k < n; k++) {
       while (vi < nV && D[k] > VIS[vi]) skyV[c * nV + vi++] = Math.atan(best) * R2D;
@@ -469,17 +495,34 @@ function panorama({ lat, lon, agl = 2, alt = null, maxDist = 200000, cols = 7200
         const hx = elev(u + step, v, d), hy = elev(u, v - step, d);
         const gx = (hx - h) / (step * mPerU), gy = (hy - h) / (step * mPerU);
         const nl = 1 / Math.sqrt(gx * gx + gy * gy + 1);
-        let s = (-gx * SUN[0] - gy * SUN[1] + SUN[2]) * nl;
-        s = 0.35 + 0.75 * Math.max(0, s);
+        let s = (-gx * SL[0] - gy * SL[1] + SL[2]) * nl, lit = 0;
+        if (sunOn) {
+          // Schatten ändert sich zwischen direkt benachbarten Proben kaum: nur jede zweite neu prüfen
+          if (sun.alt > -0.5 && s > 0) {
+            if (!(k & 1) || lastSh < 0 || lastK !== k - 1) lastSh = d < 100000 && shadowed(u, v, h, d) ? 1 : 0;
+            lastK = k;
+            lit = lastSh ? 0 : Math.min(1, s * 1.15);
+          }
+          if (!lit && s > 0) nShadow++;
+          s = (0.3 + 0.8 * lit) * dayK;
+        } else s = 0.35 + 0.75 * Math.max(0, s);
         const snow = h > 2900 ? 1 : 0;
         let same;
         if (useSat) {
           if (!satColor(satWins, u, v, d, C)) { C[0] = 128; C[1] = 132; C[2] = 120; }
           else { const m = (C[0] + C[1] + C[2]) / 3; for (let q = 0; q < 3; q++) C[q] = m + (C[q] - m) * 1.18; } // etwas kräftiger
           // Hang zur Sonne leicht aufhellen (das Satellitenbild ist von oben), dann Dunst nach Entfernung
-          const k = 1 + (0.62 + 0.5 * (s - 0.35) / 0.75 - 1) * 0.55;
           const hf = Math.min(0.86, 1 - Math.exp(-d / 42000));
-          C[0] = C[0] * k * (1 - hf) + 188 * hf; C[1] = C[1] * k * (1 - hf) + 203 * hf; C[2] = C[2] * k * (1 - hf) + 222 * hf;
+          if (sunOn) {
+            // Sonnenlicht (bei tiefer Sonne warm), im Schatten nur bläuliches Himmelslicht
+            const a = (0.42 + 0.78 * lit) * dayK;
+            const lr = a * (1 + 0.08 * warm * lit), lg = a * (1 - 0.1 * warm * lit), lb = a * (1 - 0.32 * warm * lit) * (lit ? 1 : 1.12);
+            const hr = (188 - 40 * warm) * dayK, hg = (203 - 50 * warm) * dayK, hb = (222 - 45 * warm) * dayK;
+            C[0] = C[0] * lr * (1 - hf) + hr * hf; C[1] = C[1] * lg * (1 - hf) + hg * hf; C[2] = C[2] * lb * (1 - hf) + hb * hf;
+          } else {
+            const k = 1 + (0.62 + 0.5 * (s - 0.35) / 0.75 - 1) * 0.55;
+            C[0] = C[0] * k * (1 - hf) + 188 * hf; C[1] = C[1] * k * (1 - hf) + 203 * hf; C[2] = C[2] * k * (1 - hf) + 222 * hf;
+          }
           same = Math.abs(C[0] - rC0) + Math.abs(C[1] - rC1) + Math.abs(C[2] - rC2) < 18;
         } else same = Math.abs(s - rS) < 0.08 && (rE > 2900) === !!snow;
         if (runs.length / 4 > runOff[c] && Math.abs(Math.log(d / rD)) < 0.05 && same) {
@@ -572,7 +615,7 @@ function panorama({ lat, lon, agl = 2, alt = null, maxDist = 200000, cols = 7200
     detail: wins === detail.wins && wins.length ? { total: detail.total || 0, failed: detail.failed || 0 } : { total: 0, failed: 0 },
     seg: Float32Array.from(seg), segD: Float32Array.from(segD), segKind: Uint8Array.from(segKind),
     runs: R, runOff, runCol: useSat ? Uint8ClampedArray.from(runCol) : null,
-    sky, skyD, peaks: vis, ms: Math.round(performance.now() - t0),
+    sky, skyD, peaks: vis, ms: Math.round(performance.now() - t0), sun: sunOn ? { ...sun, dayK, warm, nShadow } : null,
   };
 }
 
@@ -977,7 +1020,8 @@ function align({ pixels, w, h, hint }) {
   // Kompass im Foto: kleine Abweichungen normal, große unwahrscheinlich
   const prior = (hd) => { if ((hint.headingRange ?? 180) > 45) return 0; const d = Math.abs(((hd - hint.heading + 540) % 360) - 180); return 0.15 * (Math.max(0, d - 4) / 15) ** 2; };
   // Brennweite aus dem Foto: Bildwinkel nur wenig abweichend
-  const fovPrior = (f) => (Array.isArray(hint.fovRange) ? 0 : 25 * Math.max(0, Math.abs(f / hint.hfov - 1) - 0.02) ** 2);
+  // (iPhone-Objektive inkl. 0,5× geben den Bildwinkel genau an; ein Weitwinkelfoto rutschte sonst um 3 % daneben)
+  const fovPrior = (f) => (Array.isArray(hint.fovRange) ? 0 : 300 * Math.max(0, Math.abs(f / hint.hfov - 1) - 0.012) ** 2);
   const priors = (p) => prior(p.heading) + fovPrior(p.hfov);
   const Ef = blur(E, w, h, 0, 2);
   const tPre = performance.now() - t0;
@@ -1360,4 +1404,41 @@ function align({ pixels, w, h, hint }) {
   best.photoSky = Array.from(ys);
   best.ms = Math.round(performance.now() - t0);
   return best;
+}
+
+// ---------------------------------------------------------------- Standort suchen
+
+// GPS im Foto ungenau: Orte im Umkreis durchprobieren (Sechseckraster, dann um den besten verfeinern)
+// und den nehmen, an dem Bergumrisse und Foto am besten zusammenpassen.
+function locSearch({ id, pixels, w, h, hint, lat, lon, alt = null, agl = 2, radius = 1500, maxDist = 200000, sector = null, cols = 3600 }) {
+  const t0 = performance.now();
+  const keep = pano;
+  const wins = near(detail, lat, lon) || distAz(lat, lon, detail.lat, detail.lon)[0] < 3000 ? detail.wins : [];
+  const mLat = 111195, mLon = mLat * Math.cos(lat * D2R);
+  const tried = [];
+  const evalAt = (dx, dy) => {
+    const la = lat + dy / mLat, lo = lon + dx / mLon;
+    panorama({ lat: la, lon: lo, agl, alt, maxDist, cols, wins, satWins: [], sector });
+    let r = null;
+    try { r = align({ pixels, w, h, hint: { ...hint, nRefine: 6 } }); } catch { r = null; }
+    const c = { dx, dy, lat: la, lon: lo, s: r ? r.score + 0.5 * (r.mi || 0) : -1e9, score: r ? r.score : 0 };
+    tried.push(c);
+    post('locsearch-progress', { id, done: tried.length, total });
+    return c;
+  };
+  const ring = (cx, cy, rr, n) => Array.from({ length: n }, (_, i) => [cx + rr * Math.sin(i / n * 2 * Math.PI), cy + rr * Math.cos(i / n * 2 * Math.PI)]);
+  const nR = radius > 1500 ? 3 : 2, step = radius / nR;
+  const pts = [[0, 0]];
+  for (let k = 1; k <= nR; k++) pts.push(...ring(0, 0, k * step, 6 * k));
+  var total = pts.length + 12;
+  try {
+    let best = null;
+    for (const [dx, dy] of pts) { const c = evalAt(dx, dy); if (!best || c.s > best.s) best = c; }
+    const start = tried[0];
+    for (const f of [0.5, 0.25]) {
+      const b0 = best;
+      for (const [dx, dy] of ring(b0.dx, b0.dy, step * f, 6)) { const c = evalAt(dx, dy); if (c.s > best.s) best = c; }
+    }
+    return { lat: best.lat, lon: best.lon, s: best.s, score: best.score, s0: start.s, score0: start.score, moved: Math.hypot(best.dx, best.dy), n: tried.length, ms: Math.round(performance.now() - t0), tried: tried.map((c) => [Math.round(c.dx), Math.round(c.dy), +c.s.toFixed(3)]) };
+  } finally { pano = keep; }
 }

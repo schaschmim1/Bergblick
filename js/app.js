@@ -43,6 +43,7 @@ function call(type, data = {}, transfer) {
     worker.postMessage({ type, id, ...data }, transfer || []);
   });
 }
+const progressHandlers = new Set();
 let readyResolve;
 const ready = new Promise((r) => (readyResolve = r));
 worker.onmessage = (e) => {
@@ -51,6 +52,7 @@ worker.onmessage = (e) => {
   if (m.type === 'ready') { readyResolve(m); return; }
   if (m.type === 'detail') { showHint(`${m.what === 'sat' ? 'Lade Satellitenbilder' : 'Lade Detailgelände'}… ${Math.round(m.done / m.total * 100)} %`); return; }
   if (m.type === 'bundle-progress') { bundleState = m; checkOffline(); return; }
+  if (m.type === 'locsearch-progress') { progressHandlers.forEach((f) => f(m)); return; }
   if (m.type === 'prefetch-progress') { $('pickInfo').textContent = `Speichere Gebiet… ${m.done}/${m.total} Kacheln`; return; }
   const p = pending.get(m.id);
   if (!p) { if (m.type === 'error') console.error(m.message); return; }
@@ -119,7 +121,9 @@ function draw() {
   } else if (state.mode === 'live' && state.live.frozen) ctx.drawImage(state.live.frozen.img, 0, 0, W, H);
   if (state.pano) drawOverlay(ctx, cam, 1, state.mode === 'pano' ? 'pano' : 'photo');
   if (state.mode === 'photo') drawAnchors(cam);
+  else if (state.pano) { drawSun(ctx, cam); drawTarget(ctx, cam); }
   updateInfo(cam);
+  if (state.mode === 'photo' && state.photoId) histTouch();
 }
 
 // ---------------------------------------------------------------- Gerendertes Gelände (Panorama-Modus)
@@ -148,13 +152,14 @@ function drawPanoBackground(cam) {
 // Schlichte Darstellung wie eine gezeichnete Panoramatafel: Farbe nach Entfernung (Luftperspektive),
 // Schnee weich nach Höhe, Hangschattierung nur angedeutet.
 const NEAR = [56, 70, 58], MID = [78, 96, 112], FAR = [184, 198, 214], SNOW = [236, 240, 246];
-function terrainColor(d, e, s) {
+function terrainColor(d, e, s, S = null) {
   const tD = Math.max(0, Math.min(1, (Math.log10(Math.max(300, d)) - 2.7) / 2.4)); // 500 m … 125 km
   const a = tD < 0.45 ? NEAR : MID, b = tD < 0.45 ? MID : FAR, f = tD < 0.45 ? tD / 0.45 : (tD - 0.45) / 0.55;
   let r = a[0] + (b[0] - a[0]) * f, g = a[1] + (b[1] - a[1]) * f, bl = a[2] + (b[2] - a[2]) * f;
   const sn = Math.max(0, Math.min(1, (e - 2400) / 600)) * (1 - 0.55 * tD);
   r += (SNOW[0] - r) * sn; g += (SNOW[1] - g) * sn; bl += (SNOW[2] - bl) * sn;
-  const k = 1 + (0.86 + 0.26 * Math.max(0, Math.min(1, (s - 0.35) / 0.75)) - 1) * (1 - 0.75 * tD);
+  // mit Sonne: s ist schon die Helligkeit (Licht, Schatten, Dämmerung); in der Ferne gleicht der Dunst aus
+  const k = S ? s * (1 - 0.6 * tD) + 0.6 * tD * S.dayK : 1 + (0.86 + 0.26 * Math.max(0, Math.min(1, (s - 0.35) / 0.75)) - 1) * (1 - 0.75 * tD);
   return [r * k, g * k, bl * k];
 }
 
@@ -166,6 +171,7 @@ function renderTerrain(cam, w, h, scale) {
   const F = cam.F * scale, cx = cam.cx * scale, cy = cam.cy * scale;
   const f = cam.f, r = cam.r, u = cam.u;
   const k2c = cols / (2 * Math.PI);
+  const S = P.sun;
   for (let y = 0; y < h; y++) {
     const dy = -(y + 0.5 - cy);
     for (let x = 0; x < w; x++) {
@@ -180,7 +186,14 @@ function renderTerrain(cam, w, h, scale) {
       if (hi < lo || t > runs[hi * 4]) {
         // Himmel
         const el = Math.max(0, Math.min(1, t * 2.2));
-        px[o] = 206 - 112 * el; px[o + 1] = 224 - 80 * el; px[o + 2] = 238 - 42 * el; px[o + 3] = 255;
+        let sr = 206 - 112 * el, sg = 224 - 80 * el, sb = 238 - 42 * el;
+        if (S) {
+          // Abend- und Morgenrot am Horizont, nachts dunkel
+          const wm = S.warm * (1 - el) * (S.alt > -7 ? 0.7 : 0);
+          sr += (252 - sr) * wm; sg += (168 - sg) * wm; sb += (118 - sb) * wm;
+          sr *= S.dayK; sg *= S.dayK; sb *= Math.min(1, S.dayK * 1.3);
+        }
+        px[o] = sr; px[o + 1] = sg; px[o + 2] = sb; px[o + 3] = 255;
         continue;
       }
       while (lo < hi) { const m = (lo + hi) >> 1; if (runs[m * 4] >= t) hi = m; else lo = m + 1; }
@@ -197,7 +210,7 @@ function renderTerrain(cam, w, h, scale) {
         continue;
       }
       const q = lo * 4, d = runs[q + 1], s = runs[q + 2], e = runs[q + 3];
-      const c = terrainColor(d, e, s);
+      const c = terrainColor(d, e, s, S);
       px[o] = c[0]; px[o + 1] = c[1]; px[o + 2] = c[2]; px[o + 3] = 255;
     }
   }
@@ -404,7 +417,7 @@ async function computePanorama() {
   const { lat, lon, agl } = state.loc;
   const el = await call('elev', { lat, lon });
   if (!el.covered) { showHint('Dieser Standort liegt außerhalb der Alpen-Daten.', 4000); }
-  const base = { lat, lon, agl: Number(agl) || 2, alt: state.loc.alt ?? null, maxDist: state.settings.maxDist };
+  const base = { lat, lon, agl: Number(agl) || 2, alt: state.loc.alt ?? null, maxDist: state.settings.maxDist, sun: photoMode() ? null : sunParam() };
   if (photoMode()) {
     showHint('Lade Gelände in Blickrichtung…');
     const res = await call('panorama', { ...base, detail: true, satellite: false, noSat: true, sector: photoSector() });
@@ -437,6 +450,7 @@ async function computePanorama() {
 function applyPanorama(res) {
   state.pano = res;
   fill.key = '';
+  updateSunInfo();
   console.log(`Panorama${res.quick ? ' (schnell)' : ''}: ${res.ms} ms, Laden ${res.times.detail + res.times.sat} ms, ${res.segD.length} Segmente, ${res.peaks.length} sichtbare Gipfel`);
   requestDraw();
 }
@@ -454,6 +468,7 @@ function refineAlign() {
 }
 
 function setLocation(loc, recompute = true) {
+  state.target = null;
   state.loc = { agl: state.loc.agl ?? 2, ...loc };
   store.set('loc', state.loc);
   if (recompute) return computePanorama();
@@ -480,6 +495,8 @@ function setMode(mode) {
   // Panorama fürs Foto (nur Blickbereich, ohne Satellitenfarben) taugt nicht für Panorama und Kamera
   if (mode !== 'photo' && state.pano && state.pano.photo && (mode === 'pano' || state.pano.sector)) computePanorama();
   $('photobar').hidden = mode !== 'photo';
+  if (mode !== 'pano') $('sunBar').hidden = true;
+  $('btnSun').hidden = mode === 'photo';
   syncLiveUi();
   if (mode === 'photo') syncSliders();
   requestDraw();
@@ -834,14 +851,15 @@ function cameraAnchor(x, y) {
 
 // ---------------------------------------------------------------- Foto laden
 
-async function loadPhoto(file) {
+async function loadPhoto(file, saved = null) {
+  if (saved) return openSaved(file, saved);
   const buf = await file.arrayBuffer();
   let exif = null;
   try { exif = readExif(buf); } catch { exif = null; }
   const img = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(async () => {
     const im = new Image(); im.src = URL.createObjectURL(file); await im.decode(); return im;
   });
-  state.img = img; state.imgName = file.name.replace(/\.[^.]+$/, '') + '-bergblick'; state.photoView = null;
+  state.img = img; state.imgName = file.name.replace(/\.[^.]+$/, '') + '-bergblick'; state.photoView = null; state.photoId = null;
   state.anchors = []; state.photoSky = null; state.lastAlign = null; state.alignHint = null;
   resetZoom(); setAdjust(false);
   const iw = img.width, ih = img.height;
@@ -862,9 +880,15 @@ async function loadPhoto(file) {
   await autoAlign();
   // Das Handy speichert, wie genau die Position war; liegt sie weit daneben, passen die Linien nicht
   const err = hasGps && exif.gpsError;
+  state.gpsError = err || null;
+  if (state.img === img) await histAdd(file, img);
   if (!hasGps) showHint('Kein GPS im Foto. Tippe auf „Standort“, falls die Linien nicht passen.', 6000);
-  else if (err > 150) showHint(`Die GPS-Position im Foto ist ungenau (±${err >= 1000 ? (err / 1000).toFixed(1).replace('.', ',') + ' km' : Math.round(err) + ' m'}). Passen die Linien nicht, setze unter „Standort“ den richtigen Ort.`, 10000);
+  else if (err > 150 && state.img === img) {
+    // ungenaue Position: in der Umgebung den Ort suchen, an dem die Bergumrisse passen
+    await searchLocation(Math.min(3000, Math.max(500, err * 2)), `Die GPS-Position im Foto ist ungenau (±${fmtDist(err)}).`);
+  }
 }
+const fmtDist = (m) => m >= 1000 ? (m / 1000).toFixed(1).replace('.', ',') + ' km' : Math.round(m) + ' m';
 
 // Sucht immer im ursprünglichen Bereich aus den Fotodaten (Kompass, Brennweite). Die aktuelle Ansicht
 // und die letzte Ausrichtung werden zusätzlich als Startwerte geprüft; so stört ein versehentlich
@@ -1070,7 +1094,7 @@ function tap(x, y) {
     if (d < bd) { bd = d; best = l; }
   }
   const card = $('peakCard');
-  if (!best) { card.hidden = true; state.selected = null; requestDraw(); return; }
+  if (!best) { card.hidden = true; state.selected = null; state.target = null; requestDraw(); return; }
   const p = best.p;
   state.selected = p.i;
   const dir = ['N', 'NNO', 'NO', 'ONO', 'O', 'OSO', 'SO', 'SSO', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'][Math.round(p.az / 22.5) % 16];
@@ -1344,9 +1368,11 @@ $('btnPano').onclick = () => {
 // Foto-Reiter: ist schon ein Foto geladen, zurück dazu; erst im Foto-Reiter öffnet ein Tipp die Auswahl
 $('btnPhoto').addEventListener('click', (e) => {
   if (e.target.id === 'file') return;
-  if (state.img && state.mode !== 'photo') { e.preventDefault(); $('peakCard').hidden = true; setMode('photo'); showHint('Für ein anderes Foto nochmal auf „Foto“ tippen.', 3000); }
+  if (state.img && state.mode !== 'photo') { e.preventDefault(); $('peakCard').hidden = true; setMode('photo'); showHint('Für ein anderes Foto nochmal auf „Foto“ tippen.', 3000); return; }
+  // Gibt es schon Fotos im Verlauf: Auswahl aus Verlauf oder neues Foto
+  if (hist.count > 0) { e.preventDefault(); openHist(); }
 });
-$('file').onchange = (e) => { const f = e.target.files[0]; if (f) loadPhoto(f); e.target.value = ''; };
+$('file').onchange = (e) => { const f = e.target.files[0]; $('histSheet').hidden = true; if (f) loadPhoto(f); e.target.value = ''; };
 $('btnAlign').onclick = () => autoAlign();
 $('btnPin').onclick = () => { $('pinSheet').hidden = false; $('pinSearch').value = ''; showPinList(''); $('pinSearch').focus(); };
 $('pinSearch').addEventListener('input', () => showPinList($('pinSearch').value));
@@ -1389,6 +1415,323 @@ $('roll').oninput = () => { state.view.roll = +$('roll').value; requestDraw(); }
 addEventListener('dragover', (e) => e.preventDefault());
 addEventListener('drop', (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f && f.type.startsWith('image/')) loadPhoto(f); });
 
+// ---------------------------------------------------------------- Sonne
+
+// Sonnenstand (Azimut ab Nord, scheinbare Höhe mit Refraktion), genau auf etwa 0,01°
+function sunPos(date, lat, lon) {
+  const r = Math.PI / 180, d = date.getTime() / 86400000 - 10957.5; // Tage seit J2000
+  const g = (357.529 + 0.98560028 * d) * r, q = 280.459 + 0.98564736 * d;
+  const L = (q + 1.915 * Math.sin(g) + 0.02 * Math.sin(2 * g)) * r, e = (23.439 - 0.00000036 * d) * r;
+  const ra = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L)), dec = Math.asin(Math.sin(e) * Math.sin(L));
+  const gmst = ((18.697374558 + 24.06570982441908 * d) % 24 + 24) % 24;
+  const H = (gmst * 15 + lon) * r - ra, phi = lat * r;
+  let alt = Math.asin(Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H)) / r;
+  const az = (Math.atan2(-Math.cos(dec) * Math.sin(H), Math.sin(dec) * Math.cos(phi) - Math.cos(dec) * Math.cos(H) * Math.sin(phi)) / r + 360) % 360;
+  if (alt > -1.5) alt += 1.02 / Math.tan((alt + 10.3 / (alt + 5.11)) * r) / 60;
+  return { az, alt };
+}
+const sun = { date: null, min: 0 };
+function sunNow() { const n = new Date(); sun.date = new Date(n.getFullYear(), n.getMonth(), n.getDate()); sun.min = n.getHours() * 60 + n.getMinutes(); }
+sunNow();
+const sunAt = (min) => new Date(sun.date.getFullYear(), sun.date.getMonth(), sun.date.getDate(), 0, min);
+const sunHere = (min) => { const P = state.pano || state.loc; return sunPos(sunAt(min), P.lat, P.lon); };
+function sunParam() { if (!state.settings.sun) return null; const p = sunHere(sun.min); return { az: p.az, alt: p.alt }; }
+const hhmm = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(Math.round(m) % 60).padStart(2, '0')}`;
+// Geländehorizont in Richtung az (Grad), aus dem Panorama
+function horizonAt(az) { const P = state.pano; if (!P) return 0; const v = P.sky[Math.round(az / 360 * P.cols) % P.cols]; return v > -89 ? v : 0; }
+
+function drawSun(g, cam) {
+  if (!state.settings.sun || state.mode === 'photo') return;
+  g.save();
+  // Tagesbahn mit Stundenpunkten
+  g.setLineDash([5, 5]); g.lineWidth = 1.6; g.strokeStyle = 'rgba(255,196,80,0.9)';
+  g.beginPath();
+  let pen = false;
+  const ticks = [];
+  for (let m = 0; m <= 1440; m += 4) {
+    const p = sunHere(m), s = p.alt > -2 ? project(enuV(p.az, p.alt), cam) : null;
+    if (!s || Math.abs(s[0] - W / 2) > W * 3) { pen = false; continue; }
+    if (pen) g.lineTo(s[0], s[1]); else g.moveTo(s[0], s[1]);
+    pen = true;
+    if (m % 60 === 0) ticks.push([s[0], s[1], m / 60]);
+  }
+  g.stroke(); g.setLineDash([]);
+  g.font = '600 11px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'; g.textAlign = 'center';
+  for (const [x, y, hr] of ticks) {
+    g.fillStyle = 'rgba(255,196,80,0.95)'; g.beginPath(); g.arc(x, y, 2.5, 0, Math.PI * 2); g.fill();
+    g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.45)'; g.strokeText(hr + ' Uhr', x, y - 8); g.fillStyle = '#fff'; g.fillText(hr + ' Uhr', x, y - 8);
+  }
+  // Sonne zur gewählten Uhrzeit; hinter einem Berg nur als Umriss
+  const p = sunHere(sun.min), s = p.alt > -2 ? project(enuV(p.az, p.alt), cam) : null;
+  if (s) {
+    const hidden = p.alt < horizonAt(p.az);
+    if (!hidden) {
+      const gr = g.createRadialGradient(s[0], s[1], 4, s[0], s[1], 34);
+      gr.addColorStop(0, 'rgba(255,236,170,0.9)'); gr.addColorStop(1, 'rgba(255,200,90,0)');
+      g.fillStyle = gr; g.beginPath(); g.arc(s[0], s[1], 34, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#ffd25a'; g.beginPath(); g.arc(s[0], s[1], 9, 0, Math.PI * 2); g.fill();
+      g.lineWidth = 2; g.strokeStyle = '#fff'; g.stroke();
+    } else {
+      g.setLineDash([3, 3]); g.lineWidth = 2; g.strokeStyle = '#ffd25a';
+      g.beginPath(); g.arc(s[0], s[1], 9, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
+    }
+  }
+  g.restore();
+}
+
+// Auf- und Untergang über dem echten Gelände und über dem flachen Horizont
+function updateSunInfo() {
+  $('sunTimeVal').textContent = hhmm(sun.min) + ' Uhr';
+  if (!state.pano || $('sunBar').hidden) return;
+  let up = null, down = null, upF = null, downF = null, prev = null, prevF = null;
+  for (let m = 0; m <= 1440; m += 1) {
+    const p = sunHere(m), vis = p.alt > horizonAt(p.az), visF = p.alt > -0.27;
+    if (prev === false && vis && up == null) up = m;
+    if (prev && !vis) down = m;
+    if (prevF === false && visF && upF == null) upF = m;
+    if (prevF && !visF) downF = m;
+    prev = vis; prevF = visF;
+  }
+  const p = sunHere(sun.min), hz = horizonAt(p.az);
+  const now = p.alt < -0.27 ? (p.alt < -6 ? 'Nacht' : 'Dämmerung') : p.alt < hz ? `Sonne hinter den Bergen (${Math.round(p.alt)}° hoch)` : `Sonne ${Math.round(p.alt)}° hoch, Richtung ${Math.round(p.az)}° ${DIR16[Math.round(p.az / 22.5) % 16]}`;
+  const terr = up != null || down != null ? `Über den Bergen: ${up != null ? hhmm(up) : '–'} bis ${down != null ? hhmm(down) : '–'} Uhr` : 'Die Sonne kommt an diesem Tag nicht über die Berge';
+  $('sunInfo').innerHTML = '';
+  for (const t of [now, terr, `Aufgang ${upF != null ? hhmm(upF) : '–'} · Untergang ${downF != null ? hhmm(downF) : '–'} Uhr (flacher Horizont)`]) { const d = document.createElement('div'); d.textContent = t; $('sunInfo').append(d); }
+}
+
+function syncSunUi() {
+  $('sunOn').checked = !!state.settings.sun;
+  $('btnSun').classList.toggle('on', !!state.settings.sun);
+  const d = sun.date;
+  $('sunDate').value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  $('sunTime').value = sun.min;
+  updateSunInfo();
+}
+// Licht neu berechnen: beim Ziehen schnell und gröber, danach in voller Auflösung
+let relightTimer = 0;
+async function relight(fine) {
+  if (state.mode === 'photo' || !state.pano) return;
+  if (!state.pano.complete) { computePanorama(); return; }
+  const job = ++panoJob;
+  const { lat, lon, agl } = state.loc, on = state.settings.detail !== false;
+  if (fine) showHint(state.settings.sun ? 'Berechne Licht und Schatten…' : 'Berechne Panorama…');
+  try {
+    const res = await call('panorama', { lat, lon, agl: Number(agl) || 2, alt: state.loc.alt ?? null, maxDist: state.settings.maxDist, detail: on, satellite: on, quick: true, cols: fine ? 7200 : 2400, sun: sunParam() });
+    if (job !== panoJob) return;
+    res.lat = lat; res.lon = lon; res.complete = res.complete && fine;
+    applyPanorama(res);
+    if (fine) hideHint();
+  } catch { /* von neuerer Anfrage abgelöst */ }
+}
+function sunChanged(fine) {
+  updateSunInfo(); requestDraw();
+  if (!state.settings.sun) return;
+  clearTimeout(relightTimer);
+  relightTimer = setTimeout(() => relight(fine), fine ? 30 : 120);
+}
+$('btnSun').onclick = () => {
+  const b = $('sunBar');
+  b.hidden = !b.hidden;
+  if (!b.hidden) {
+    if (state.mode !== 'pano') $('btnPano').onclick();
+    if (!state.settings.sun) { state.settings.sun = true; saveSettings(); relight(true); }
+    syncSunUi();
+  }
+};
+$('btnSunClose').onclick = () => { $('sunBar').hidden = true; };
+$('sunOn').onchange = () => { state.settings.sun = $('sunOn').checked; saveSettings(); syncSunUi(); relight(true); requestDraw(); };
+$('sunTime').oninput = () => { sun.min = +$('sunTime').value; sunChanged(false); };
+$('sunTime').onchange = () => { sun.min = +$('sunTime').value; sunChanged(true); };
+$('sunDate').onchange = () => { const v = $('sunDate').value.split('-').map(Number); if (v.length === 3 && v[0]) { sun.date = new Date(v[0], v[1] - 1, v[2]); sunChanged(true); } };
+$('btnSunNow').onclick = () => { sunNow(); syncSunUi(); sunChanged(true); };
+
+// ---------------------------------------------------------------- Gipfelsuche
+
+function openFind() {
+  for (const id of ['locSheet', 'setSheet', 'pinSheet', 'histSheet']) $(id).hidden = true;
+  $('findSheet').hidden = false; $('findInput').value = ''; showFindList(''); $('findInput').focus();
+}
+let findSeq = 0;
+async function showFindList(q) {
+  const P = state.pano; if (!P) return;
+  const seq = ++findSeq;
+  let list;
+  if (!q.trim()) list = [...P.peaks].sort((a, b) => (Math.log2(1 + b.iso) - b.dist / 30000) - (Math.log2(1 + a.iso) - a.dist / 30000)).slice(0, 25);
+  else {
+    const r = await call('search', { q, lat: P.lat, lon: P.lon });
+    if (seq !== findSeq) return;
+    list = r.results.map((x) => P.peaks.find((p) => p.i === x.i) || peakFromSearch(x));
+  }
+  const ul = $('findResults'); ul.innerHTML = '';
+  if (!list.length) { const li = document.createElement('li'); li.textContent = 'Kein Gipfel gefunden'; ul.append(li); return; }
+  for (const p of list) {
+    const li = document.createElement('li');
+    li.textContent = p.name;
+    const vis = P.peaks.some((x) => x.i === p.i);
+    const sp = document.createElement('span');
+    sp.innerHTML = `${Math.round(p.ele)} m · ${fmtDist(p.dist)} · <b class="tag${vis ? '' : ' off'}">${vis ? 'sichtbar' : p.dist > state.settings.maxDist ? 'zu weit' : 'verdeckt'}</b>`;
+    li.append(sp);
+    li.onclick = () => goToPeak(p);
+    ul.append(li);
+  }
+}
+$('btnFind').onclick = openFind;
+$('findInput').addEventListener('input', () => showFindList($('findInput').value));
+
+// Panorama zum Gipfel drehen (weich) und ihn markieren
+function goToPeak(p) {
+  $('findSheet').hidden = true; $('peakCard').hidden = true;
+  if (state.mode !== 'pano') $('btnPano').onclick();
+  state.target = p; state.selected = p.i;
+  const v0 = { ...state.view };
+  const dH = ((p.az - v0.heading + 540) % 360) - 180;
+  const toP = Math.max(-25, Math.min(35, p.el + 1)), toF = Math.max(12, Math.min(v0.hfov, p.dist > 40000 ? 20 : 30));
+  const t0 = performance.now();
+  const step = () => {
+    const t = Math.min(1, (performance.now() - t0) / 700), e = 1 - (1 - t) ** 3;
+    state.view.heading = (v0.heading + dH * e + 360) % 360; state.view.pitch = v0.pitch + (toP - v0.pitch) * e; state.view.hfov = v0.hfov + (toF - v0.hfov) * e;
+    requestDraw();
+    if (t < 1 && state.target === p) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+  const vis = state.pano.peaks.some((x) => x.i === p.i);
+  showHint(vis ? `${p.name} · ${Math.round(p.ele)} m · ${fmtDist(p.dist)}` : p.dist > state.settings.maxDist ? `${p.name} liegt ${fmtDist(p.dist)} entfernt, weiter als die Sichtweite.` : `${p.name} ist von hier verdeckt (${fmtDist(p.dist)}).`, 6000);
+}
+
+function drawTarget(g, cam) {
+  const t = state.target; if (!t) return;
+  const s = project(t.v, cam); if (!s) return;
+  const vis = state.pano.peaks.some((x) => x.i === t.i);
+  g.save();
+  g.lineWidth = 2.5; g.strokeStyle = '#ffb547';
+  if (!vis) g.setLineDash([4, 4]);
+  g.beginPath(); g.arc(s[0], s[1], 13, 0, Math.PI * 2); g.stroke();
+  g.setLineDash([]);
+  if (!vis) {
+    g.font = '600 13px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'; g.textAlign = 'center';
+    const txt = `${t.name} (verdeckt)`;
+    g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.6)'; g.strokeText(txt, s[0], s[1] + 32); g.fillStyle = '#ffd9a0'; g.fillText(txt, s[0], s[1] + 32);
+  }
+  g.restore();
+}
+
+// ---------------------------------------------------------------- Fotoverlauf
+
+// Die letzten Fotos samt Standort und Ausrichtung im Gerät (IndexedDB), zum späteren Wiederöffnen
+const HIST_MAX = 12;
+const hist = { db: null, count: 0, last: '', timer: 0 };
+function histDb() {
+  return hist.db ||= new Promise((res, rej) => {
+    const r = indexedDB.open('bergblick', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('photos', { keyPath: 'id', autoIncrement: true });
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+}
+async function histReq(mode, fn) {
+  const db = await histDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('photos', mode), rq = fn(tx.objectStore('photos'));
+    tx.oncomplete = () => res(rq && rq.result); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error);
+  });
+}
+const histRecord = () => ({ loc: { ...state.loc }, view: { ...state.view }, alignHint: state.alignHint, anchors: state.anchors || [] });
+async function histAdd(file, img) {
+  try {
+    const c = document.createElement('canvas'), k = 240 / Math.max(img.width, img.height);
+    c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const rec = { t: Date.now(), name: file.name, blob: file, thumb: c.toDataURL('image/jpeg', 0.75), ...histRecord() };
+    state.photoId = await histReq('readwrite', (st) => st.add(rec));
+    hist.last = JSON.stringify(histRecord());
+    const all = await histReq('readonly', (st) => st.getAllKeys());
+    for (const id of all.slice(0, Math.max(0, all.length - HIST_MAX))) await histReq('readwrite', (st) => st.delete(id));
+    hist.count = Math.min(all.length, HIST_MAX);
+  } catch (e) { console.warn('Fotoverlauf:', e); }
+}
+// Ausrichtung und Standort des offenen Fotos nachführen (gebündelt)
+function histTouch() {
+  clearTimeout(hist.timer);
+  hist.timer = setTimeout(async () => {
+    if (state.mode !== 'photo' || !state.photoId) return;
+    const r = histRecord(), j = JSON.stringify(r);
+    if (j === hist.last) return;
+    hist.last = j;
+    const id = state.photoId;
+    try {
+      const old = await histReq('readonly', (st) => st.get(id));
+      if (old) await histReq('readwrite', (st) => st.put({ ...old, ...r }));
+    } catch (e) { console.warn('Fotoverlauf:', e); }
+  }, 1200);
+}
+async function openHist() {
+  for (const id of ['locSheet', 'setSheet', 'pinSheet', 'findSheet']) $(id).hidden = true;
+  $('histSheet').hidden = false;
+  const ul = $('histList'); ul.innerHTML = '';
+  let all = [];
+  try { all = await histReq('readonly', (st) => st.getAll()); } catch { all = []; }
+  hist.count = all.length;
+  for (const e of all.reverse()) {
+    const li = document.createElement('li');
+    const im = document.createElement('img'); im.src = e.thumb; im.alt = '';
+    const cap = document.createElement('div'); cap.className = 'cap';
+    const b = document.createElement('b'); b.textContent = e.loc && e.loc.name ? e.loc.name : e.loc ? `${e.loc.lat.toFixed(3)}, ${e.loc.lon.toFixed(3)}` : e.name;
+    const sp = document.createElement('span'); sp.textContent = new Date(e.t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+    cap.append(b, sp);
+    const del = document.createElement('button'); del.className = 'del'; del.textContent = '✕'; del.setAttribute('aria-label', 'Aus dem Verlauf löschen');
+    del.onclick = async (ev) => { ev.stopPropagation(); await histReq('readwrite', (st) => st.delete(e.id)); if (state.photoId === e.id) state.photoId = null; li.remove(); hist.count--; };
+    li.onclick = () => { $('histSheet').hidden = true; loadPhoto(e.blob, e); };
+    li.append(im, cap, del);
+    ul.append(li);
+  }
+  if (!all.length) { const li = document.createElement('p'); li.className = 'small'; li.textContent = 'Noch keine Fotos.'; ul.append(li); }
+}
+// Foto aus dem Verlauf: gespeicherte Ausrichtung und Standort, kein neues Ausrichten
+async function openSaved(file, saved) {
+  const img = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(async () => {
+    const im = new Image(); im.src = URL.createObjectURL(file); await im.decode(); return im;
+  });
+  state.img = img; state.imgName = (saved.name || 'foto').replace(/\.[^.]+$/, '') + '-bergblick'; state.photoView = null;
+  state.photoSky = null; state.lastAlign = null; state.alignHint = saved.alignHint || null; state.anchors = saved.anchors || [];
+  resetZoom(); setAdjust(false); stopLive();
+  state.view = { ...saved.view };
+  state.photoId = saved.id; hist.last = JSON.stringify({ loc: saved.loc, view: saved.view, alignHint: saved.alignHint, anchors: saved.anchors || [] });
+  setMode('photo');
+  syncSliders();
+  if (saved.loc) await setLocation(saved.loc, false);
+  showHint('Foto aus dem Verlauf, lade Gelände…');
+  await computePanorama();
+  showHint('Foto aus dem Verlauf geöffnet.', 3000);
+}
+histReq('readonly', (st) => st.count()).then((n) => { hist.count = n || 0; }).catch(() => {});
+
+// ---------------------------------------------------------------- Standort suchen (ungenaues GPS)
+
+let locBusy = false;
+async function searchLocation(radius, why = '') {
+  if (!state.img || locBusy || !state.pano) return;
+  locBusy = true;
+  const btn = $('btnLocSearch'); btn.disabled = true;
+  const img = state.img, from = { ...state.loc };
+  const onProg = (m) => { if (m.type === 'locsearch-progress') showHint(`${why ? why + ' ' : ''}Suche den Standort im Umkreis von ${fmtDist(radius)}… ${m.done}/${m.total}`); };
+  progressHandlers.add(onProg);
+  showHint(`${why ? why + ' ' : ''}Suche den Standort im Umkreis von ${fmtDist(radius)}…`);
+  try {
+    const { px, w, h } = photoPixels(640);
+    const hint = state.alignHint || { heading: state.view.heading, hfov: state.view.hfov, headingRange: 180, fovRange: [25, 120] };
+    const r = await call('locsearch', { pixels: px.buffer, w, h, hint, lat: from.lat, lon: from.lon, alt: from.alt ?? null, agl: Number(from.agl) || 2, radius, maxDist: state.settings.maxDist, sector: photoSector() }, [px.buffer]);
+    console.log('Standortsuche', r);
+    if (state.img !== img) return;
+    // nur umziehen, wenn der neue Ort deutlich besser passt
+    if (r.moved > 40 && r.s > r.s0 * 1.2 + 0.05) {
+      await setLocation({ lat: r.lat, lon: r.lon, alt: null, name: '' }, false);
+      await autoAlign();
+      showHint(`Standort nach den Bergumrissen um ${fmtDist(r.moved)} korrigiert. Stimmt er nicht, setze ihn unter „Standort“.`, 9000);
+    } else showHint(`Der Standort passt${why ? ' trotzdem' : ''}: in der Umgebung liegen die Bergumrisse nicht besser.`, 6000);
+  } catch (e) { showHint('Standortsuche fehlgeschlagen: ' + e.message, 5000); }
+  finally { progressHandlers.delete(onProg); locBusy = false; btn.disabled = false; }
+}
+$('btnLocSearch').onclick = () => searchLocation(Math.min(3000, Math.max(800, (state.gpsError || 0) * 2)));
+
 // ---------------------------------------------------------------- Start
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
@@ -1406,4 +1749,4 @@ ready.then(async (m) => {
 
 
 // Für Tests und Fehlersuche
-window.bergblick = { state, shoot, setZoom, openCamAdjust, photoPixels, call, computePanorama, setLocation, autoAlign, loadPhoto, requestDraw, setMode, renderTerrain, fill, solveAnchors };
+window.bergblick = { state, sun, sunPos, relight, goToPeak, searchLocation, openHist, shoot, setZoom, openCamAdjust, photoPixels, call, computePanorama, setLocation, autoAlign, loadPhoto, requestDraw, setMode, renderTerrain, fill, solveAnchors };
