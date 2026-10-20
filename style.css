@@ -171,3 +171,6 @@ label.btnlike { display: block; text-align: center; cursor: pointer; }
 .histlist .cap b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .histlist .cap span { color: var(--muted); }
 .histlist .del { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(255, 255, 255, .85); color: var(--muted); font-size: 12px; }
+#btnSun .sunico { color: #d99a16; }
+#btnSun .sunico circle { fill: #ffc93c; }
+#btnSun.on { background: #fff4d6; }
