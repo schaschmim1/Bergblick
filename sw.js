@@ -1,5 +1,5 @@
 // Service Worker: speichert App, Alpen-Daten und geladene Detailkacheln für den Offline-Betrieb.
-const VERSION = 'bergblick-v11c';
+const VERSION = 'bergblick-v12';
 const TILES = 'bergblick-tiles'; // Detailkacheln, bleiben über App-Updates erhalten
 const DEM11 = 'bergblick-dem11-p2z'; // mitgeliefertes Detailgelände (Zoom 11 und 12), ebenso
 const SAT = 'bergblick-sat'; // Satellitenbilder aus dem Netz, ebenso

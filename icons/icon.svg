@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<defs>
+<linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b98e4"/><stop offset=".6" stop-color="#a8cbf3"/><stop offset="1" stop-color="#d8e7f9"/></linearGradient>
+<linearGradient id="haze" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e3eefa" stop-opacity="0"/><stop offset="1" stop-color="#e3eefa" stop-opacity=".7"/></linearGradient>
+</defs>
+<rect width="512" height="512" fill="url(#sky)"/>
+<!-- Großvenediger-Massiv: breite Firnkuppe mit Nebengipfeln, Schneefläche -->
+<path d="M0 300 L30 288 L52 262 L74 282 L104 258 L132 276 L160 252 L196 244 L228 226 L262 200 L286 176 L304 162 L324 174 L352 192 L386 184 L414 204 L446 194 L476 214 L512 210 L512 370 L0 370Z" fill="#f7fbff"/>
+<!-- Schattenseite rechts der Kuppe -->
+<path d="M304 162 L324 174 L352 192 L386 184 L414 204 L400 238 L364 252 L330 238 L316 206Z" fill="#d5e4f6"/>
+<path d="M104 258 L132 276 L160 252 L150 292 L116 300Z" fill="#dae7f7"/>
+<path d="M446 194 L476 214 L512 210 L512 262 L460 252 L452 224Z" fill="#dae7f7"/>
+<path d="M228 226 L262 200 L286 176 L296 214 L274 250 L238 262Z" fill="#eaf2fc"/>
+<!-- blaue Vorberge, "Schneestreifen"-Berg in der Mitte -->
+<path d="M0 322 L48 306 L96 322 L150 310 L206 330 L250 300 L300 296 L346 318 L398 300 L450 322 L512 312 L512 420 L0 420Z" fill="#9db9e2"/>
+<path d="M170 346 L232 304 L276 288 L326 304 L388 340 L420 372 L430 420 L150 420Z" fill="#6f93c8"/>
+<path d="M276 292 L292 296 L302 336 L288 356 L276 336Z M300 300 L318 310 L334 348 L316 340Z" fill="#f2f7fd" opacity=".95"/>
+<path d="M0 366 L50 348 L110 342 L170 356 L212 372 L240 400 L0 400Z" fill="#7a9ccd"/>
+<path d="M300 368 L366 336 L430 340 L512 332 L512 410 L330 410Z" fill="#6b8fc4"/>
+<rect x="0" y="270" width="512" height="170" fill="url(#haze)"/>
+<!-- dunkle Hügel und Wald -->
+<path d="M0 398 C70 366 170 372 236 404 C302 384 410 378 512 402 L512 512 L0 512Z" fill="#2c5163"/>
+<path d="M0 446 C90 420 200 428 282 454 C362 434 440 434 512 450 L512 512 L0 512Z" fill="#1d3d46"/>
+<path d="M34,362.0 L20.7,494.0 L47.3,494.0Z" fill="#142b30"/><path d="M34,395.0 L16.4,523.7 L51.5,523.7Z" fill="#142b30"/><path d="M34,428.0 L12.2,553.4 L55.8,553.4Z" fill="#142b30"/><path d="M34,461.0 L8.0,583.1 L60.0,583.1Z" fill="#142b30"/><rect x="31.4" y="491.0" width="5.2" height="21.0" fill="#142b30"/><path d="M84,406.0 L73.8,508.1 L94.2,508.1Z" fill="#183338"/><path d="M84,431.5 L70.5,531.0 L97.5,531.0Z" fill="#183338"/><path d="M84,457.0 L67.2,554.0 L100.8,554.0Z" fill="#183338"/><path d="M84,482.6 L64.0,577.0 L104.0,577.0Z" fill="#183338"/><rect x="82.0" y="505.8" width="4.0" height="16.2" fill="#183338"/><path d="M-4,320.0 L-18.3,471.4 L10.3,471.4Z" fill="#102528"/><path d="M-4,357.8 L-22.9,505.4 L14.9,505.4Z" fill="#102528"/><path d="M-4,395.7 L-27.4,539.5 L19.4,539.5Z" fill="#102528"/><path d="M-4,433.5 L-32.0,573.5 L24.0,573.5Z" fill="#102528"/><rect x="-6.8" y="467.9" width="5.6" height="24.1" fill="#102528"/><path d="M132,446.0 L123.8,521.7 L140.2,521.7Z" fill="#1a373c"/><path d="M132,464.9 L121.2,538.7 L142.8,538.7Z" fill="#1a373c"/><path d="M132,483.8 L118.6,555.7 L145.4,555.7Z" fill="#1a373c"/><path d="M132,502.8 L116.0,572.8 L148.0,572.8Z" fill="#1a373c"/><rect x="130.4" y="520.0" width="3.2" height="12.0" fill="#1a373c"/><path d="M474,372.0 L461.2,495.2 L486.8,495.2Z" fill="#142b30"/><path d="M474,402.8 L457.1,522.9 L490.9,522.9Z" fill="#142b30"/><path d="M474,433.6 L453.1,550.6 L494.9,550.6Z" fill="#142b30"/><path d="M474,464.4 L449.0,578.4 L499.0,578.4Z" fill="#142b30"/><rect x="471.5" y="492.4" width="5.0" height="19.6" fill="#142b30"/><path d="M426,420.0 L416.3,511.5 L435.7,511.5Z" fill="#183338"/><path d="M426,442.9 L413.2,532.1 L438.8,532.1Z" fill="#183338"/><path d="M426,465.8 L410.1,552.7 L441.9,552.7Z" fill="#183338"/><path d="M426,488.6 L407.0,573.3 L445.0,573.3Z" fill="#183338"/><rect x="424.1" y="509.4" width="3.8" height="14.6" fill="#183338"/><path d="M518,332.0 L503.6,472.8 L532.4,472.8Z" fill="#102528"/><path d="M518,367.2 L499.1,504.5 L536.9,504.5Z" fill="#102528"/><path d="M518,402.4 L494.6,536.2 L541.5,536.2Z" fill="#102528"/><path d="M518,437.6 L490.0,567.8 L546.0,567.8Z" fill="#102528"/><rect x="515.2" y="469.6" width="5.6" height="22.4" fill="#102528"/><path d="M380,456.0 L372.3,524.6 L387.7,524.6Z" fill="#1a373c"/><path d="M380,473.2 L369.9,540.1 L390.1,540.1Z" fill="#1a373c"/><path d="M380,490.3 L367.4,555.5 L392.6,555.5Z" fill="#1a373c"/><path d="M380,507.5 L365.0,571.0 L395.0,571.0Z" fill="#1a373c"/><rect x="378.5" y="523.1" width="3.0" height="10.9" fill="#1a373c"/>
+</svg>
