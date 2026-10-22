@@ -4,7 +4,7 @@ import { SlippyMap } from './map.js';
 import { distAz, drop } from './terrain.js';
 
 const $ = (id) => document.getElementById(id);
-const APP_VERSION = 'v12';
+const APP_VERSION = 'v12b';
 const DECLINATION = 3.5; // Missweisung in den Alpen (Ost), Grad
 const DATA_BASE = new URL('../data', import.meta.url).href;
 
