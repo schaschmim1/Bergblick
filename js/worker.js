@@ -258,7 +258,33 @@ function makeSampler(wins = detail.wins) {
 // Sentinel-2-Kacheln (Zoom 12 für DE/AT, 11 für die Alpen; außerhalb ebenfalls online). Ganz fern auf
 // 64×64 gemittelt, damit nichts flimmert und der Speicher klein bleibt.
 const ESRI = (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
+// Amtliche Luftbilder (20–40 cm) dort, wo es sie frei gibt; sonst und bei Fehlern Esri.
+// Reihenfolge nach Lage der Kachel, eine leere Kachel (außerhalb des Landes) gilt als fehlend.
+const ORTHO = {
+  by: { name: 'Bayern', url: (z, x, y) => `https://wmtsod${1 + ((x + y) % 9)}.bayernwolke.de/wmts/by_dop/smerc/${z}/${x}/${y}`, box: [8.95, 47.25, 13.91, 50.58] },
+  at: { name: 'Österreich', url: (z, x, y) => `https://maps${1 + ((x + y) % 4)}.wien.gv.at/basemap/bmaporthofoto30cm/normal/google3857/${z}/${y}/${x}.jpeg`, box: [9.5, 46.37, 17.2, 49.03] },
+  ch: { name: 'Schweiz', url: (z, x, y) => `https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.swissimage/default/current/3857/${z}/${x}/${y}.jpeg`, box: [5.95, 45.8, 10.5, 47.81] },
+};
+const orthoOk = { by: true, at: true, ch: true };
+function sourcesFor(z, x, y) {
+  const n = 2 ** z, lon = (x + 0.5) / n * 360 - 180, lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 0.5) / n))) * R2D;
+  const inBox = (b) => lon >= b[0] && lon <= b[2] && lat >= b[1] && lat <= b[3];
+  // Grenzgebiet Bayern/Tirol: nördlich von ~47,55° zuerst Bayern, sonst Österreich zuerst
+  const order = lat > 47.55 ? ['by', 'at', 'ch'] : ['at', 'ch', 'by'];
+  return order.filter((k) => orthoOk[k] && inBox(ORTHO[k].box));
+}
+// fast nur eine Farbe (weiß, schwarz oder durchsichtig) = keine Daten an dieser Stelle
+function emptyTile(t) {
+  let n = 0, same = 0;
+  const r0 = t[0], g0 = t[1], b0 = t[2];
+  for (let i = 0; i < t.length; i += 4 * 37) {
+    n++;
+    if (t[i + 3] < 10 || (Math.abs(t[i] - r0) < 4 && Math.abs(t[i + 1] - g0) < 4 && Math.abs(t[i + 2] - b0) < 4)) same++;
+  }
+  return same > n * 0.97;
+}
 const SAT_LEVELS = [
+  { z: 17, r: 700, online: true },
   { z: 15, r: 1500, online: true },
   { z: 13, r: 5000, online: true },
   { z: 12, r: 15000 },
@@ -301,6 +327,12 @@ async function satTile(L, x, y) {
   if (!L.online && inBundle(L.z, x, y)) {
     try { t = await decodeImage(`${BASE}/sat/${L.z}/${x}_${y}.jpg`, size); } catch { t = null; }
   }
+  if (!t && L.online) {
+    for (const k of sourcesFor(L.z, x, y)) {
+      try { const d = await decodeImage(ORTHO[k].url(L.z, x, y), size); if (!emptyTile(d)) { t = d; break; } }
+      catch (e) { if (e instanceof TypeError) orthoOk[k] = false; } // ohne Freigabe (CORS): Dienst nicht mehr fragen
+    }
+  }
   if (!t) {
     if (!esriOk) throw new Error('offline');
     try { t = await decodeImage(ESRI(L.z, x, y), size); } catch (e) { if (e instanceof TypeError) esriOk = false; throw e; }
@@ -337,7 +369,7 @@ class SatWin {
 async function ensureSat(lat, lon, id) {
   if (typeof OffscreenCanvas === 'undefined') return;
   if (near(sat, lat, lon)) return;
-  const wins = SAT_LEVELS.filter((L) => !L.online || esriOk).map((L) => new SatWin(L, lat, lon));
+  const wins = SAT_LEVELS.filter((L) => !L.online || esriOk || Object.values(orthoOk).some(Boolean)).map((L) => new SatWin(L, lat, lon));
   const jobs = [];
   for (const w of wins) for (const [x, y] of w.base.tiles()) jobs.push([w, x, y]);
   let done = 0, aborted = false;
@@ -346,7 +378,7 @@ async function ensureSat(lat, lon, id) {
     while (jobs.length) {
       if (fullJob !== id) { aborted = true; jobs.length = 0; break; }
       const [w, x, y] = jobs.shift();
-      if (w.L.online && !esriOk) continue;
+      if (w.L.online && !esriOk && !Object.values(orthoOk).some(Boolean)) continue;
       try { w.put(x, y, await satTile(w.L, x, y)); } catch { /* gröbere Stufe springt ein */ }
       if (++done % 8 === 0) post('detail', { id, done, total, failed: 0, what: 'sat' });
     }

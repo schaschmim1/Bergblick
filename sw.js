@@ -1,5 +1,5 @@
 // Service Worker: speichert App, Alpen-Daten und geladene Detailkacheln für den Offline-Betrieb.
-const VERSION = 'bergblick-v10b';
+const VERSION = 'bergblick-v11';
 const TILES = 'bergblick-tiles'; // Detailkacheln, bleiben über App-Updates erhalten
 const DEM11 = 'bergblick-dem11-p2z'; // mitgeliefertes Detailgelände (Zoom 11 und 12), ebenso
 const SAT = 'bergblick-sat'; // Satellitenbilder aus dem Netz, ebenso
@@ -51,7 +51,7 @@ self.addEventListener('fetch', (e) => {
     return;
   }
   // Satellitenbilder fürs Panorama (vom Worker mit CORS geladen): einmal geladen, auch offline da
-  if (url.host === 'server.arcgisonline.com' && url.pathname.includes('/World_Imagery/')) {
+  if ((url.host === 'server.arcgisonline.com' && url.pathname.includes('/World_Imagery/')) || /bayernwolke\.de$|\.wien\.gv\.at$|^wmts\.geo\.admin\.ch$/.test(url.host)) {
     e.respondWith((async () => {
       const cache = await caches.open(SAT);
       const hit = await cache.match(e.request.url);
