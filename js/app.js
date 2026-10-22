@@ -4,6 +4,7 @@ import { SlippyMap } from './map.js';
 import { distAz, drop } from './terrain.js';
 
 const $ = (id) => document.getElementById(id);
+const APP_VERSION = 'v11b';
 const DECLINATION = 3.5; // Missweisung in den Alpen (Ost), Grad
 const DATA_BASE = new URL('../data', import.meta.url).href;
 
@@ -1284,6 +1285,7 @@ $('btnSetLoc').onclick = () => {
 // ---------------------------------------------------------------- Einstellungen
 
 function openSettings() {
+  $('appVersion').textContent = 'Version ' + APP_VERSION;
   $('setSheet').hidden = false; $('locSheet').hidden = true;
   $('setDist').value = state.settings.maxDist; $('setRidges').checked = state.settings.ridges; $('setFill').checked = state.settings.fill; $('setDetail').checked = state.settings.detail !== false;
   $('setCamFov').value = state.settings.camFov; $('setOffset').value = Number(state.settings.offset || 0).toFixed(1);
