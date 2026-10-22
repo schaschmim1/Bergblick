@@ -174,3 +174,6 @@ label.btnlike { display: block; text-align: center; cursor: pointer; }
 #btnSun .sunico { color: #d99a16; }
 #btnSun .sunico circle { fill: #ffc93c; }
 #btnSun.on { background: #fff4d6; }
+#btnSun:not(.on) .sunico { color: var(--muted); }
+#btnSun:not(.on) .sunico circle { fill: none; }
+.sunbar.off .sun-row, .sunbar.off .adj-row { opacity: .45; }

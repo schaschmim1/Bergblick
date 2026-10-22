@@ -4,7 +4,7 @@ import { SlippyMap } from './map.js';
 import { distAz, drop } from './terrain.js';
 
 const $ = (id) => document.getElementById(id);
-const APP_VERSION = 'v11b';
+const APP_VERSION = 'v11c';
 const DECLINATION = 3.5; // Missweisung in den Alpen (Ost), Grad
 const DATA_BASE = new URL('../data', import.meta.url).href;
 
@@ -1484,6 +1484,7 @@ function drawSun(g, cam) {
 // Auf- und Untergang über dem echten Gelände und über dem flachen Horizont
 function updateSunInfo() {
   $('sunTimeVal').textContent = hhmm(sun.min) + ' Uhr';
+  $('sunBar').classList.toggle('off', !state.settings.sun);
   if (!state.pano || $('sunBar').hidden) return;
   let up = null, down = null, upF = null, downF = null, prev = null, prevF = null;
   for (let m = 0; m <= 1440; m += 1) {
@@ -1498,6 +1499,7 @@ function updateSunInfo() {
   const now = p.alt < -0.27 ? (p.alt < -6 ? 'Nacht' : 'Dämmerung') : p.alt < hz ? `Sonne hinter den Bergen (${Math.round(p.alt)}° hoch)` : `Sonne ${Math.round(p.alt)}° hoch, Richtung ${Math.round(p.az)}° ${DIR16[Math.round(p.az / 22.5) % 16]}`;
   const terr = up != null || down != null ? `Über den Bergen: ${up != null ? hhmm(up) : '–'} bis ${down != null ? hhmm(down) : '–'} Uhr` : 'Die Sonne kommt an diesem Tag nicht über die Berge';
   $('sunInfo').innerHTML = '';
+  if (!state.settings.sun) { $('sunInfo').textContent = 'Aus: gleichmäßiges Licht, ohne Schatten und ohne Sonne im Bild.'; return; }
   for (const t of [now, terr, `Aufgang ${upF != null ? hhmm(upF) : '–'} · Untergang ${downF != null ? hhmm(downF) : '–'} Uhr (flacher Horizont)`]) { const d = document.createElement('div'); d.textContent = t; $('sunInfo').append(d); }
 }
 
@@ -1536,7 +1538,8 @@ $('btnSun').onclick = () => {
   b.hidden = !b.hidden;
   if (!b.hidden) {
     if (state.mode !== 'pano') $('btnPano').onclick();
-    if (!state.settings.sun) { state.settings.sun = true; saveSettings(); relight(true); }
+    // nur beim allerersten Öffnen einschalten; danach gilt, was der Schalter zuletzt war
+    if (state.settings.sun === undefined) { state.settings.sun = true; saveSettings(); relight(true); }
     syncSunUi();
   }
 };
